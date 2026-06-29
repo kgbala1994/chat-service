@@ -25,10 +25,18 @@ A REST API backend for one-to-one messaging between users, with cursor-based pag
 ```bash
 git clone https://github.com/YOUR_USERNAME/chat-service.git
 cd chat-service
+
+# Create virtual environment (required on macOS 3.12+)
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
 pip install -e ".[dev]"
 ```
 
 This installs FastAPI, uvicorn, pytest, and all dependencies.
+
+> **Note:** If you see "externally managed environment" error, make sure you activated the venv first with `source venv/bin/activate`.
 
 ### Step 2: Run Tests (verify everything works)
 
