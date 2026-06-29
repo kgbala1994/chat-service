@@ -7,6 +7,7 @@ table grants read access to a conversation.
 """
 
 import aiosqlite
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -53,10 +54,12 @@ class ConversationRepository:
         return conversation_id
 
     async def update_conversation_timestamp(self, conversation_id: int):
-        """Update the updated_at timestamp when a new message is sent."""
+        """Update the updated_at timestamp when a new message is sent.
+        Uses Python datetime for sub-second precision (SQLite CURRENT_TIMESTAMP is second-level)."""
+        now = datetime.now(timezone.utc).isoformat()
         await self.db.execute(
-            "UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (conversation_id,),
+            "UPDATE conversations SET updated_at = ? WHERE id = ?",
+            (now, conversation_id),
         )
         await self.db.commit()
 
@@ -89,6 +92,9 @@ class ConversationRepository:
         """
         Get all conversations for a user, ordered by most recent activity.
         Includes the other participant's info for display.
+
+        Orders by the MAX message id in each conversation (monotonically increasing,
+        guaranteed unique) rather than timestamp to avoid same-second ordering issues.
         """
         rows = await (
             await self.db.execute(
@@ -97,13 +103,14 @@ class ConversationRepository:
                     c.id AS conversation_id,
                     c.updated_at,
                     u.id AS other_user_id,
-                    u.username AS other_username
+                    u.username AS other_username,
+                    (SELECT MAX(m.id) FROM messages m WHERE m.conversation_id = c.id) AS last_msg_id
                 FROM participants p
                 JOIN conversations c ON p.conversation_id = c.id
                 JOIN participants p2 ON c.id = p2.conversation_id AND p2.user_id != p.user_id
                 JOIN users u ON p2.user_id = u.id
                 WHERE p.user_id = ?
-                ORDER BY c.updated_at DESC
+                ORDER BY last_msg_id DESC
                 """,
                 (user_id,),
             )
