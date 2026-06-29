@@ -11,7 +11,12 @@ import pytest_asyncio
 import os
 import json
 from httpx import AsyncClient, ASGITransport
-from pytest_html import extras as pytest_html_extras
+
+try:
+    from pytest_html import extras as pytest_html_extras
+    HAS_PYTEST_HTML = True
+except ImportError:
+    HAS_PYTEST_HTML = False
 
 # Use in-memory database for tests
 os.environ["DATABASE_PATH"] = ":memory:"
@@ -158,7 +163,7 @@ def pytest_runtest_makereport(item, call):
     report = outcome.get_result()
 
     # Attach on "call" phase (the actual test execution, not setup/teardown)
-    if report.when == "call":
+    if report.when == "call" and HAS_PYTEST_HTML:
         node_id = item.nodeid
         logs = _test_api_logs.get(node_id, [])
         if logs:
