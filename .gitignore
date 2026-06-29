@@ -11,3 +11,5 @@ chat.db
 .env
 venv/
 .venv/
+test-report.html
+assets/
