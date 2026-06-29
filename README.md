@@ -13,40 +13,109 @@ A REST API backend for one-to-one messaging between users, with cursor-based pag
   - Message input area (bottom)
 -->
 
-## Quick Start
+## Quick Start (3 commands)
 
 ### Prerequisites
-- Python 3.10+
+- Python 3.10+ (check with `python3 --version`)
+- pip (comes with Python)
+- No Docker, no database server, no Node.js needed
 
-### Install & Run
+### Step 1: Clone & Install
 
 ```bash
-# Clone the repository
-git clone <repo-url>
+git clone https://github.com/YOUR_USERNAME/chat-service.git
 cd chat-service
-
-# Install dependencies
 pip install -e ".[dev]"
-
-# Run the server
-uvicorn backend.app.main:app --reload --port 8000
-
-# Open the UI
-open http://localhost:8000/
 ```
 
-### Run Tests
+This installs FastAPI, uvicorn, pytest, and all dependencies.
+
+### Step 2: Run Tests (verify everything works)
 
 ```bash
-# All tests
-pytest
-
-# With verbose output
+# Run all 23 tests
 pytest -v
 
-# Specific test file
-pytest tests/test_pagination.py -v
+# Generate HTML report with request/response details
+pytest --html=test-report.html --self-contained-html
+open test-report.html
 ```
+
+Expected output:
+```
+23 passed in 0.10s
+```
+
+### Step 3: Start the Server
+
+```bash
+uvicorn backend.app.main:app --reload --port 8000
+```
+
+Now open in browser:
+| URL | What It Shows |
+|-----|---------------|
+| http://localhost:8000 | Chat UI (send messages, switch users) |
+| http://localhost:8000/docs | Swagger API docs (try endpoints interactively) |
+
+### Step 4: Try the API Manually (optional)
+
+```bash
+# Send a message (Alice -> Bob)
+curl -X POST http://localhost:8000/api/v1/messages \
+  -H "X-User-Id: 1" -H "Content-Type: application/json" \
+  -d '{"recipient_id": 2, "body": "Hello Bob"}'
+
+# Get conversation messages (paginated)
+curl http://localhost:8000/api/v1/conversations/1/messages?limit=5 \
+  -H "X-User-Id: 1"
+
+# List user's conversations
+curl http://localhost:8000/api/v1/users/1/conversations \
+  -H "X-User-Id: 1"
+
+# Authorization test — Charlie tries to read Alice-Bob chat (should get 403)
+curl http://localhost:8000/api/v1/conversations/1/messages \
+  -H "X-User-Id: 3"
+```
+
+### Step 5: Run Live API Test Script (optional)
+
+```bash
+# With server running in another terminal:
+bash scripts/test_api_manual.sh
+```
+
+This runs 16 curl-based tests against the live server covering all requirements.
+
+### Stop the Server
+
+```bash
+# Ctrl+C in the terminal running uvicorn
+# Or:
+pkill -f "uvicorn backend.app.main:app"
+```
+
+---
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| `ModuleNotFoundError: backend` | Run `pip install -e ".[dev]"` from project root |
+| `Port 8000 already in use` | `pkill -f uvicorn` or use `--port 8001` |
+| `python3 not found` | Install Python 3.10+ from python.org |
+| Tests fail with import error | Make sure you're in the `chat-service/` directory |
+
+---
+
+### Available Users (pre-seeded)
+
+| ID | Username | Use in header as |
+|----|----------|-----------------|
+| 1 | alice | `X-User-Id: 1` |
+| 2 | bob | `X-User-Id: 2` |
+| 3 | charlie | `X-User-Id: 3` |
 
 ## Architecture
 
