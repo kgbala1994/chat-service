@@ -2,6 +2,17 @@
 
 A REST API backend for one-to-one messaging between users, with cursor-based pagination, authorization enforcement, and a minimal web UI.
 
+## UI Preview
+
+![Chat Service UI](docs/images/ui-screenshot.png)
+
+<!-- TODO: Add screenshot showing the chat interface with:
+  - User selector dropdown (top-right)
+  - Conversation list sidebar (left)
+  - Message history with sent/received bubbles (center)
+  - Message input area (bottom)
+-->
+
 ## Quick Start
 
 ### Prerequisites
