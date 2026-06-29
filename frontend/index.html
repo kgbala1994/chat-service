@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Service — POC</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: #f5f5f5;
+        }
+
+        /* Header */
+        .header {
+            background: #1a73e8;
+            color: white;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 { font-size: 18px; font-weight: 500; }
+        .user-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .user-selector label { font-size: 13px; opacity: 0.9; }
+        .user-selector select {
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: none;
+            font-size: 13px;
+        }
+
+        /* Main layout */
+        .main {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background: white;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar-header {
+            padding: 16px;
+            font-weight: 600;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .new-chat-btn {
+            background: #1a73e8;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .conversation-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+        .conversation-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .conversation-item:hover { background: #f0f7ff; }
+        .conversation-item.active { background: #e3f2fd; }
+        .conversation-item .name { font-weight: 500; font-size: 14px; }
+        .conversation-item .preview {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Chat area */
+        .chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #fafafa;
+        }
+        .chat-header {
+            padding: 16px;
+            background: white;
+            border-bottom: 1px solid #e0e0e0;
+            font-weight: 500;
+        }
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .message {
+            max-width: 70%;
+            padding: 8px 14px;
+            border-radius: 16px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        .message.sent {
+            align-self: flex-end;
+            background: #1a73e8;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+        .message.received {
+            align-self: flex-start;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-bottom-left-radius: 4px;
+        }
+        .message .time {
+            font-size: 10px;
+            opacity: 0.7;
+            margin-top: 4px;
+        }
+        .load-more {
+            text-align: center;
+            padding: 8px;
+        }
+        .load-more button {
+            background: none;
+            border: 1px solid #ccc;
+            padding: 6px 16px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #666;
+        }
+
+        /* Input area */
+        .input-area {
+            padding: 12px 16px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 8px;
+        }
+        .input-area input {
+            flex: 1;
+            padding: 10px 16px;
+            border: 1px solid #e0e0e0;
+            border-radius: 20px;
+            font-size: 14px;
+            outline: none;
+        }
+        .input-area input:focus { border-color: #1a73e8; }
+        .input-area button {
+            background: #1a73e8;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Empty states */
+        .empty-state {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+            font-size: 14px;
+        }
+
+        /* Error banner */
+        .error-banner {
+            background: #ffebee;
+            color: #c62828;
+            padding: 8px 16px;
+            font-size: 13px;
+            display: none;
+        }
+        .error-banner.visible { display: block; }
+
+        /* New chat modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.4);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+        .modal-overlay.visible { display: flex; }
+        .modal {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            width: 320px;
+        }
+        .modal h3 { margin-bottom: 16px; }
+        .modal select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 16px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+        }
+        .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+        .modal-actions button {
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid #e0e0e0;
+            background: white;
+        }
+        .modal-actions button.primary {
+            background: #1a73e8;
+            color: white;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Chat Service (POC)</h1>
+        <div class="user-selector">
+            <label>Logged in as:</label>
+            <select id="currentUser" onchange="switchUser()">
+                <!-- populated dynamically -->
+            </select>
+        </div>
+    </div>
+
+    <div class="error-banner" id="errorBanner"></div>
+
+    <div class="main">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <span>Conversations</span>
+                <button class="new-chat-btn" onclick="showNewChatModal()">+ New</button>
+            </div>
+            <div class="conversation-list" id="conversationList">
+                <div class="empty-state">No conversations yet</div>
+            </div>
+        </div>
+
+        <div class="chat-area">
+            <div class="chat-header" id="chatHeader">Select a conversation</div>
+            <div class="messages" id="messageList">
+                <div class="empty-state">Select a conversation to view messages</div>
+            </div>
+            <div class="input-area">
+                <input type="text" id="messageInput" placeholder="Type a message..."
+                       onkeypress="if(event.key==='Enter') sendMessage()" disabled>
+                <button onclick="sendMessage()" id="sendBtn" disabled>Send</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Chat Modal -->
+    <div class="modal-overlay" id="newChatModal">
+        <div class="modal">
+            <h3>Start New Conversation</h3>
+            <select id="recipientSelect">
+                <!-- populated dynamically -->
+            </select>
+            <div class="modal-actions">
+                <button onclick="hideNewChatModal()">Cancel</button>
+                <button class="primary" onclick="startNewChat()">Start Chat</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/v1';
+        let currentUserId = 1;
+        let activeConversationId = null;
+        let allUsers = [];
+        let oldestMessageCursor = null;
+        let hasMoreMessages = false;
+
+        // --- API Helpers ---
+        async function api(method, path, body = null) {
+            const opts = {
+                method,
+                headers: { 'X-User-Id': String(currentUserId), 'Content-Type': 'application/json' }
+            };
+            if (body) opts.body = JSON.stringify(body);
+            const res = await fetch(API_BASE + path, opts);
+            const data = await res.json();
+            if (!res.ok) {
+                const msg = data.detail?.message || data.detail || JSON.stringify(data);
+                showError(`${res.status}: ${msg}`);
+                throw new Error(msg);
+            }
+            hideError();
+            return data;
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('errorBanner');
+            el.textContent = msg;
+            el.classList.add('visible');
+        }
+        function hideError() {
+            document.getElementById('errorBanner').classList.remove('visible');
+        }
+
+        // --- Initialize ---
+        async function init() {
+            const data = await api('GET', '/users');
+            allUsers = data.users;
+
+            const select = document.getElementById('currentUser');
+            select.innerHTML = allUsers.map(u =>
+                `<option value="${u.id}">${u.username}</option>`
+            ).join('');
+            select.value = currentUserId;
+
+            await loadConversations();
+        }
+
+        function switchUser() {
+            currentUserId = parseInt(document.getElementById('currentUser').value);
+            activeConversationId = null;
+            document.getElementById('chatHeader').textContent = 'Select a conversation';
+            document.getElementById('messageList').innerHTML = '<div class="empty-state">Select a conversation to view messages</div>';
+            document.getElementById('messageInput').disabled = true;
+            document.getElementById('sendBtn').disabled = true;
+            loadConversations();
+        }
+
+        // --- Conversations ---
+        async function loadConversations() {
+            try {
+                const data = await api('GET', `/users/${currentUserId}/conversations`);
+                const list = document.getElementById('conversationList');
+
+                if (data.conversations.length === 0) {
+                    list.innerHTML = '<div class="empty-state">No conversations yet</div>';
+                    return;
+                }
+
+                list.innerHTML = data.conversations.map(c => `
+                    <div class="conversation-item ${c.id === activeConversationId ? 'active' : ''}"
+                         onclick="openConversation(${c.id}, '${c.other_user.username}')">
+                        <div class="name">${c.other_user.username}</div>
+                        <div class="preview">${c.last_message ? c.last_message.body : 'No messages'}</div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                // Error already shown by api()
+            }
+        }
+
+        async function openConversation(convId, otherUsername) {
+            activeConversationId = convId;
+            oldestMessageCursor = null;
+            hasMoreMessages = false;
+
+            document.getElementById('chatHeader').textContent = `Chat with ${otherUsername}`;
+            document.getElementById('messageInput').disabled = false;
+            document.getElementById('sendBtn').disabled = false;
+            document.getElementById('messageInput').focus();
+
+            // Highlight active
+            document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
+            event.currentTarget?.classList.add('active');
+
+            await loadMessages();
+        }
+
+        // --- Messages ---
+        async function loadMessages(append = false) {
+            if (!activeConversationId) return;
+
+            let url = `/conversations/${activeConversationId}/messages?limit=20`;
+            if (append && oldestMessageCursor) {
+                url += `&before=${oldestMessageCursor}`;
+            }
+
+            try {
+                const data = await api('GET', url);
+                hasMoreMessages = data.pagination.has_more;
+                oldestMessageCursor = data.pagination.next_cursor;
+
+                const list = document.getElementById('messageList');
+
+                if (!append) {
+                    list.innerHTML = '';
+                }
+
+                // Load more button at top
+                const existingLoadMore = list.querySelector('.load-more');
+                if (existingLoadMore) existingLoadMore.remove();
+
+                if (hasMoreMessages) {
+                    const loadMoreDiv = document.createElement('div');
+                    loadMoreDiv.className = 'load-more';
+                    loadMoreDiv.innerHTML = '<button onclick="loadMessages(true)">Load older messages</button>';
+                    list.prepend(loadMoreDiv);
+                }
+
+                // Messages are returned newest-first, reverse for display
+                const messages = [...data.messages].reverse();
+
+                const fragment = document.createDocumentFragment();
+                messages.forEach(m => {
+                    const div = document.createElement('div');
+                    div.className = `message ${m.sender_id === currentUserId ? 'sent' : 'received'}`;
+                    const time = new Date(m.created_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+                    div.innerHTML = `${m.body}<div class="time">${time}</div>`;
+                    fragment.appendChild(div);
+                });
+
+                if (append) {
+                    // Insert after load-more button
+                    const loadMore = list.querySelector('.load-more');
+                    if (loadMore) {
+                        loadMore.after(fragment);
+                    } else {
+                        list.prepend(fragment);
+                    }
+                } else {
+                    list.appendChild(fragment);
+                    list.scrollTop = list.scrollHeight;
+                }
+
+                if (data.messages.length === 0 && !append) {
+                    list.innerHTML = '<div class="empty-state">No messages yet. Say hello!</div>';
+                }
+            } catch (e) {
+                // Error shown by api()
+            }
+        }
+
+        // --- Send Message ---
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const body = input.value.trim();
+            if (!body || !activeConversationId) return;
+
+            // Find other user in this conversation
+            const convItems = document.querySelectorAll('.conversation-item');
+            const otherUsername = document.getElementById('chatHeader').textContent.replace('Chat with ', '');
+            const otherUser = allUsers.find(u => u.username === otherUsername);
+            if (!otherUser) return;
+
+            input.value = '';
+
+            try {
+                await api('POST', '/messages', {
+                    recipient_id: otherUser.id,
+                    body: body
+                });
+                // Reload messages and conversation list
+                await loadMessages();
+                await loadConversations();
+            } catch (e) {
+                input.value = body; // Restore on error
+            }
+        }
+
+        // --- New Chat Modal ---
+        function showNewChatModal() {
+            const select = document.getElementById('recipientSelect');
+            const others = allUsers.filter(u => u.id !== currentUserId);
+            select.innerHTML = others.map(u =>
+                `<option value="${u.id}">${u.username}</option>`
+            ).join('');
+            document.getElementById('newChatModal').classList.add('visible');
+        }
+
+        function hideNewChatModal() {
+            document.getElementById('newChatModal').classList.remove('visible');
+        }
+
+        async function startNewChat() {
+            const recipientId = parseInt(document.getElementById('recipientSelect').value);
+            hideNewChatModal();
+
+            // Send initial message to create conversation
+            const input = document.getElementById('messageInput');
+            try {
+                const msg = await api('POST', '/messages', {
+                    recipient_id: recipientId,
+                    body: 'Hello!'
+                });
+                await loadConversations();
+                const otherUser = allUsers.find(u => u.id === recipientId);
+                await openConversation(msg.conversation_id, otherUser.username);
+            } catch (e) {
+                // Error shown
+            }
+        }
+
+        // --- Authorization Demo ---
+        // You can test auth by:
+        // 1. Send a message as Alice to Bob
+        // 2. Switch to Charlie
+        // 3. Charlie won't see Alice-Bob conversation
+        // 4. If you manually try to access via console:
+        //    fetch('/api/v1/conversations/1/messages', {headers:{'X-User-Id':'3'}})
+        //    → 403 Forbidden
+
+        // Start
+        init();
+    </script>
+</body>
+</html>
