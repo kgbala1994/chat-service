@@ -2,81 +2,181 @@
 
 ## 1. What I Asked the AI to Do vs. What I Decided Myself
 
-### My decisions (judgment calls):
-- **Data model design**: I chose to separate `conversations` and `participants` into distinct tables rather than embedding participant arrays in a conversations table. This normalized approach creates a clean authorization boundary (participants table = access control list) and avoids the limitations of array-based queries.
-- **Cursor-based pagination over offset**: I specified this upfront based on the stability requirement. The AI's first suggestion included offset as a "simpler" option — I overrode this because the spec explicitly requires stable pagination under concurrent writes.
-- **Repository pattern with dependency injection**: I decided on layered architecture (Route → Service → Repository) to demonstrate separation of concerns and make the database swappable. This was a deliberate choice for the audience (senior reviewers expect this).
-- **Conversation ordering by MAX(message.id)**: During testing, I discovered that ordering by `updated_at` timestamp fails when messages arrive within the same second (common in tests, possible in production). I switched to using the message ID which is monotonically increasing and unambiguous.
-- **Single HTML file for UI**: I rejected the AI's suggestion to use React — a reviewer shouldn't need `npm install` and a build step to see the UI work.
+### My Decisions (Engineering Judgment)
 
-### What AI generated (with my guidance):
-- Boilerplate: FastAPI route definitions, Pydantic schemas, SQL DDL
-- Test structure: Basic test patterns (I specified WHAT to test, AI generated the code)
-- Documentation formatting: Markdown structure for ADRs and docs
-- CSS styling: The UI's visual appearance
+The entire development journey — from requirements to final implementation — was driven by my decisions. AI was a tool for execution speed, not design direction.
+
+**Requirements & Scoping (Stage 0-1):**
+- Decomposed the vague 3-line requirement into 6 testable functional requirements
+- Defined explicit assumptions (1:1 only, no real-time, mocked auth) to control scope
+- Set NFR targets: p99 < 100ms send latency, 99.99% availability at production scale
+- Identified what to defer (group chat, E2E encryption, search) and why
+
+**Architecture (Stage 2-3):**
+- Evaluated 3 architecture options (Monolith, Microservices, Serverless) with weighted scoring
+- Chose monolith for POC
+- Selected Python + FastAPI (readability, auto Swagger docs, async support)
+- Rejected SQLAlchemy in favor of raw SQL for POC
+- Rejected React for UI — single HTML file means zero build step
+
+**Data Model (Stage 4):**
+- Designed the `participants` table as the authorization boundary (not middleware, not JSON arrays)
+- Chose composite index `(conversation_id, id DESC)` specifically for cursor pagination query performance
+- Made `client_message_id` nullable + unique for idempotency without forcing it on all clients
+
+**Implementation (Stage 7):**
+- Chose 3-layer architecture (Route → Service → Repository) for testability and DB portability
+- Put authorization in the service layer (not routes, not middleware) because it requires business context
+- Designed conversation auto-creation on first message (users think "message person", not "create conversation")
+- Added conditional sample data on fresh install — UI isn't empty on first run, but sample data only loads when the messages table is empty (won't pollute existing data)
+- Ensured test isolation from production — tests use per-test in-memory SQLite via dependency override, never touching the server's `chat.db`. Running `pytest` while the server is live has zero side effects on the UI.
+
+**Bug Fix (discovered during testing):**
+- Found that ordering conversations by `updated_at` fails when messages arrive in the same second
+- Switched to `MAX(message.id)` — monotonic, unique, unambiguous. This was my debugging, not AI's.
+
+### What AI Generated (With My Specification)
+
+| I Specified | AI Produced |
+|-------------|-------------|
+| Table names, columns, constraints, indexes | `CREATE TABLE` SQL syntax |
+| Endpoint paths, verbs, status codes, error formats | FastAPI route boilerplate |
+| Field names, types, validation rules | Pydantic schema classes |
+| Test scenarios (WHAT to test) | pytest test code (HOW to test it) |
+| "Chat bubbles, left-right aligned, user switcher" | HTML + CSS + JS implementation |
+| "Capture request/response pairs in HTML report" | pytest hook + LoggingClient wrapper |
+| ADR structure and content points | Markdown formatting |
+
+
+---
 
 ## 2. Where I Overrode, Corrected, or Threw Away AI Output
 
-| What AI Produced | What I Changed | Why |
-|------------------|----------------|-----|
-| Offset-based pagination initially | Replaced with cursor (id-based) | Spec requires stability under concurrent writes; offset fails this |
-| `CURRENT_TIMESTAMP` for ordering | Changed to `MAX(message.id)` subquery | Found in testing that same-second timestamps break ordering |
-| JWT auth implementation | Replaced with simple X-User-Id header | Over-engineering for a POC; auth infra isn't what's being evaluated |
-| SQLAlchemy ORM | Replaced with raw SQL in repositories | More transparent, easier to explain, shows actual queries |
-| Test fixture with bare `except` in yield | Fixed to proper `yield` without exception swallowing | FastAPI's dependency injection requires exceptions to propagate |
-| Separate test database file | Changed to in-memory SQLite per test | Faster, fully isolated, no cleanup needed |
-| Complex folder structure with `models/` | Flattened — schemas are sufficient | No ORM = no separate model layer needed |
+| What AI Produced | What I Changed To | Why |
+|------------------|-------------------|-----|
+| Offset-based pagination | Cursor-based (`id < ?`) | Spec requires stability under concurrent writes. Offset fails: new messages shift pages, causing duplicates/skips. Cursor guarantees `id < X` never includes newer messages. |
+| `CURRENT_TIMESTAMP` for conversation ordering | `MAX(message.id)` subquery | Found in testing: two conversations updated in the same second have identical timestamps → non-deterministic ordering. Message ID is monotonic and always unique. |
+| JWT auth with token validation | Simple `X-User-Id` header | Over-engineering. The assignment evaluates authorization *logic*, not auth *infrastructure*. JWT adds zero signal about my engineering judgment. |
+| SQLAlchemy ORM with model classes | Raw parameterized SQL in repositories | Transparency. `SELECT * FROM messages WHERE conversation_id = ? AND id < ? ORDER BY id DESC LIMIT ?` shows exactly what happens. An ORM hides this behind magic. |
+| Test fixture with `try/except Exception: pass` | Clean `yield db` without exception swallowing | FastAPI's dependency injection system requires exceptions to propagate through yield-based dependencies. Swallowing them caused `FastAPIError: Response not awaited`. |
+| Separate test database file (`test.db`) | In-memory SQLite per test (`:memory:`) | Faster execution (no disk I/O), perfect isolation (no shared state), no cleanup needed between tests. |
+| Complex folder structure with `models/`, `dto/`, `exceptions/` | Flat: `schemas/`, `services/`, `repositories/` | No ORM = no models layer. No custom exceptions needed when `HTTPException` suffices. Fewer files = less cognitive load for reviewer. |
+| Docker Compose with PostgreSQL | `pip install -e ".[dev]" && pytest` | 10-second setup vs 2-minute setup. The Repository Pattern means my SQL is PostgreSQL-compatible anyway — Docker adds friction without proving anything new. |
+| React frontend with npm build | Single HTML file (vanilla JS) | A reviewer who needs `npm install && npm run build` may not bother. A reviewer who opens `localhost:8000` sees the UI instantly. |
+| Empty UI on first install | Conditional sample data (3 messages) | First-time users see a working conversation immediately. Sample data only loads when DB is empty — never overwrites real data. |
+| Shared test database (tests pollute server data) | Per-test in-memory DB with dependency override | Tests and server are completely isolated. `pytest` can run while the server is live without any side effects on the UI. |
+
+
+---
 
 ## 3. Biggest Trade-offs
 
-### Trade-off 1: SQLite vs PostgreSQL
+### Trade-off 1: SQLite vs. PostgreSQL
 
 **Chose:** SQLite
-**Alternative:** PostgreSQL (with Docker Compose)
+**Lost:** Concurrent writes, `LISTEN/NOTIFY` for real-time, production load testing
 
-**Why:** Reviewers should be able to `pip install && pytest` in under 30 seconds. Docker adds friction. The Repository pattern means the choice is purely about deployment ergonomics — the SQL is PostgreSQL-compatible, the interface is abstract, and swapping requires only a new repository implementation.
+**Why acceptable:** The Repository Pattern is the insurance policy. My API contract, service logic, and tests are database-agnostic. Swapping to PostgreSQL means writing new repository implementations — zero changes to routes, services, or tests. I chose reviewer UX over production fidelity because:
+- A reviewer who can `pytest` in 5 seconds will read my code carefully
+- A reviewer who fights Docker for 5 minutes will skim
 
-**What I lose:** Concurrent writes, LISTEN/NOTIFY for real-time, production-grade performance testing.
+**Production path:** PostgreSQL (Phase 1) → Cassandra for messages at scale (Phase 4). Same cursor pagination works because Cassandra's `TIMEUUID` clustering key serves the same purpose as auto-increment ID.
 
-### Trade-off 2: Cursor Pagination (message ID) vs Keyset (timestamp + ID)
+---
 
-**Chose:** Simple cursor using auto-increment `id`
-**Alternative:** Composite keyset `(created_at, id)` for distributed systems
+### Trade-off 2: Cursor Pagination (ID) vs. Offset Pagination
 
-**Why:** With a single SQLite/PostgreSQL database, auto-increment IDs are globally unique and monotonically increasing — a composite key adds complexity without benefit. In Cassandra (production), you'd switch to TIMEUUID as the clustering key, which serves the same purpose.
+**Chose:** Cursor (`WHERE id < ? ORDER BY id DESC LIMIT ?`)
+**Lost:** Ability to "jump to page N" directly
 
-**What I lose:** The ability to paginate by "messages since time X" (useful for sync protocols). Would add as a separate endpoint if needed.
+**Why non-negotiable:** The requirement says "pagination must be stable as new messages arrive." This eliminates offset:
 
-### Trade-off 3: Layered Architecture vs Direct SQL in Handlers
+```
+Offset problem:
+  Page 1: messages [20, 19, 18, 17, 16] (offset=0, limit=5)
+  → New message 21 arrives
+  Page 2: messages [16, 15, 14, 13, 12] (offset=5, limit=5)
+  → Message 16 appears TWICE (shifted by the new insert)
+
+Cursor solution:
+  Page 1: messages [20, 19, 18, 17, 16] → cursor = 16
+  → New message 21 arrives
+  Page 2: messages [15, 14, 13, 12, 11] (id < 16)
+  → Stable. Message 21 has id > 16, so it's invisible to this cursor.
+```
+
+Proven by: `test_pagination_stability_under_new_messages`
+
+---
+
+### Trade-off 3: 3-Layer Architecture vs. Direct SQL in Handlers
 
 **Chose:** Route → Service → Repository (3 layers)
-**Alternative:** SQL directly in route handlers (fewer files, less indirection)
+**Lost:** Fewer files, less indirection, faster initial development
 
-**Why:** The evaluation criteria mention "clean data model" and "meaningful tests." The service layer is where authorization lives — testing it without HTTP overhead proves correctness. The repository layer proves the design is database-agnostic. Two extra files per entity is a small price for testability and clarity.
+**Why worth it:**
+1. **Authorization has a home.** Where does "is this user a participant?" live? In the service layer. Not scattered across routes. Not duplicated in middleware.
+2. **Database is swappable.** Replace `MessageRepository` with `CassandraMessageRepository` — service layer doesn't know or care.
+3. **Tests are meaningful.** Integration tests hit the full stack. If I ever need unit tests, I can mock repositories without mocking HTTP.
 
-**What I lose:** Simplicity of fewer files. For a 3-endpoint service, this is arguably over-engineered — but it demonstrates the patterns expected at scale.
+For a 3-endpoint service, this is arguably over-engineered. But it demonstrates that I structure code for change, not just for "it works today."
+
+---
+
+### Trade-off 4: REST Polling vs. WebSocket
+
+**Chose:** REST only (UI polls every 3 seconds)
+**Lost:** Real-time message delivery, typing indicators, presence
+
+**Why acceptable:** WebSocket is a transport optimization, not an architectural change. The data flow is identical:
+1. Message is written to database
+2. Message is delivered to recipient
+
+With REST, step 2 happens on next poll. With WebSocket, step 2 happens via push. The service layer, repository layer, authorization logic, and data model are unchanged. Adding WebSocket later is additive — it doesn't replace REST (you still need REST for message history, conversation listing, etc.).
+
+---
 
 ## 4. What's Missing / What I'd Do With Another Day
 
-### Immediate additions:
-- **WebSocket endpoint** for real-time message delivery (avoid polling)
-- **Docker Compose** with PostgreSQL for a more realistic setup
-- **Rate limiting** middleware (60 msg/min per user)
-- **Structured logging** with request IDs for debugging
+### Must-Add for Production Readiness
 
-### Production-readiness:
-- **Read receipts** (`read_receipts` table, `PATCH /messages/:id/read`)
-- **Message search** (Elasticsearch integration or FTS5 for SQLite)
-- **Soft delete** with `deleted_at` field
-- **Database migrations** via Alembic instead of schema in code
-- **Load testing** with Locust to find actual throughput ceiling
-- **Health check endpoint** (`/health`) for load balancer integration
-- **OpenTelemetry tracing** for cross-service observability
-- **CI pipeline** (GitHub Actions: lint → test → build → deploy)
+| Feature | Why It Matters | Implementation Approach |
+|---------|---------------|----------------------|
+| **WebSocket delivery** | Users expect instant messages, not 3-second polling delay | Separate WebSocket gateway service. On message write → publish to Redis Pub/Sub → gateway pushes to connected recipient. REST API unchanged. |
+| **Rate limiting** | Without it, one client can spam the database | Redis sliding window: `INCR user:{id}:minute` with 60-second TTL. Return `429 Too Many Requests` + `Retry-After` header. |
+| **Database migrations** | Schema in code is fine for POC, unacceptable for production | Alembic. Version-controlled migration files. `alembic upgrade head` on deploy. |
+| **Structured logging** | `print()` is useless for debugging production issues | JSON logs with `trace_id`, `user_id`, `action`, `duration_ms`. Ship to Loki/ELK. Correlate with distributed tracing. |
+| **Health check endpoint** | Load balancer needs to know if instance is alive | `GET /health` → checks DB connection, returns `{"status": "healthy"}` or 503. |
 
-### Architecture evolution (at 10M DAU):
-- Extract into Message Service + Conversation Service
-- Kafka for async message processing (decouple write from read)
-- Cassandra for message storage (partition by conversation_id)
-- Redis for caching conversation lists and unread counts
-- WebSocket gateway as separate service (horizontal scaling)
+### Observability (Production)
+
+| Signal | Tool | What It Answers |
+|--------|------|----------------|
+| Metrics | Prometheus + Grafana | "Is the system healthy?" (latency, errors, throughput) |
+| Logs | Structured JSON → Loki | "What happened on this request?" (debugging) |
+| Traces | OpenTelemetry + Jaeger | "Where is the time being spent?" (optimization) |
+| Alerts | PagerDuty | "Wake someone up" (p99 > 500ms, error rate > 1%) |
+
+**SLOs I'd define:**
+- Availability: 99.99% (52 min downtime/year)
+- Send latency p99: < 100ms
+- Read latency p99: < 200ms
+- Message ordering: 100% per-conversation (guaranteed by monotonic IDs)
+
+### Scale Architecture (10M DAU)
+
+```
+Current (POC):     FastAPI → SQLite
+Phase 1:           FastAPI → PostgreSQL + Redis cache
+Phase 2:           + WebSocket gateway + Redis Pub/Sub
+Phase 3:           + Kafka (async writes) + Cassandra (message storage)
+Phase 4:           Split into Message Service + Conversation Service
+```
+
+### What This POC Proves Despite Being "Just SQLite"
+
+The guarantees hold regardless of database:
+- **Ordering**: Cursor pagination is stable (proven by test)
+- **Authorization**: Participant table enforces access (proven by test)
+- **Idempotency**: Duplicate sends are safe (proven by test)
+- **Portability**: Repository Pattern means the architecture scales — only the adapter changes

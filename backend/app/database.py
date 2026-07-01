@@ -53,6 +53,16 @@ INSERT OR IGNORE INTO users (id, username) VALUES (2, 'bob');
 INSERT OR IGNORE INTO users (id, username) VALUES (3, 'charlie');
 """
 
+# Sample data for fresh installs — gives the UI something to show on first run
+SAMPLE_DATA_SQL = """
+INSERT OR IGNORE INTO conversations (id) VALUES (1);
+INSERT OR IGNORE INTO participants (conversation_id, user_id) VALUES (1, 1);
+INSERT OR IGNORE INTO participants (conversation_id, user_id) VALUES (1, 2);
+INSERT OR IGNORE INTO messages (conversation_id, sender_id, body) VALUES (1, 1, 'Hey Bob, how are you?');
+INSERT OR IGNORE INTO messages (conversation_id, sender_id, body) VALUES (1, 2, 'Hi Alice! Doing great, thanks.');
+INSERT OR IGNORE INTO messages (conversation_id, sender_id, body) VALUES (1, 1, 'Want to catch up later today?');
+"""
+
 
 async def get_db() -> aiosqlite.Connection:
     """Get a database connection. Called per-request via FastAPI Depends."""
@@ -67,10 +77,21 @@ async def get_db() -> aiosqlite.Connection:
 
 
 async def init_db(db_path: str = None):
-    """Initialize database schema and seed data."""
+    """Initialize database schema and seed data.
+
+    On first run (fresh database), also inserts sample messages
+    so the UI isn't empty.
+    """
     path = db_path or DATABASE_PATH
     db = await aiosqlite.connect(path)
     await db.executescript(SCHEMA_SQL)
     await db.executescript(SEED_SQL)
+
+    # Only insert sample data if no messages exist yet (fresh install)
+    cursor = await db.execute("SELECT COUNT(*) FROM messages")
+    row = await cursor.fetchone()
+    if row[0] == 0:
+        await db.executescript(SAMPLE_DATA_SQL)
+
     await db.commit()
     await db.close()
